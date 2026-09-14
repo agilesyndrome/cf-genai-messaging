@@ -27,5 +27,5 @@ jobs:
         run: |
           expected_tag="v$(node -p "require('./package.json').version")"
           test "$GITHUB_REF_NAME" = "$expected_tag"
-      - run: npx --yes @agilesyndrome/cf-genai-cli@0.1.3 ci
+      - run: npx --yes @agilesyndrome/cf-genai-cli@0.5.1 ci
       - run: npm publish
