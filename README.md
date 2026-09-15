@@ -20,7 +20,10 @@ message refers to a more specific object.
 domain objects. `groupMessage(input)` is the same message shape with explicit
 group semantics and an optional audience.
 
-`createMessagingStore(env.DB)` provides a D1-backed repository:
+`createMessagingStore(env.DB, { authorize })` provides a D1-backed repository.
+The callback is required and runs before every read or write; return `true` only
+after checking the current user and conversation/participant policy. For
+automatic tenant/user scoping, pass the base package's scoped data reader.
 
 ```js
 import {
@@ -28,7 +31,7 @@ import {
   groupMessage,
 } from "@agilesyndrome/cf-genai-messaging";
 
-const messaging = createMessagingStore(env.DB);
+const messaging = createMessagingStore(env.DB, { authorize: ({ operation, conversationId }) => policy.allows(operation, conversationId) });
 const thread = await messaging.getOrCreateConversation({
   context: "recipe://123",
   createdBy: { type: "user", key: "alex", name: "Alex" },
@@ -65,6 +68,8 @@ message context is text, and structured metadata/audience are JSON. A host
 application applies or vendors that base migration, then may add an
 application-owned migration to copy legacy records into these tables.
 
-The default feature factory remains available as `createFeature(options)`
-(or `createMessagingFeature(options)`) for applications that compose
-middleware through `cf-genai-base`.
+The default feature factory remains available as `createFeature(options)` (or
+`createMessagingFeature(options)`) for applications that compose middleware and
+routes through `cf-genai-base`. It reports this package's name and version and
+accepts host-supplied `dataResources`, `routes`, healthchecks, and breakers; the
+host remains responsible for tenant-specific schema declarations.

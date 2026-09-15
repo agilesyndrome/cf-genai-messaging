@@ -6,6 +6,8 @@ import {
   createMessagingStore,
   groupMessage,
   message,
+  PACKAGE_NAME,
+  VERSION,
 } from "../src/index.js";
 
 class FakeD1 {
@@ -94,7 +96,7 @@ test("domain models support opaque contexts and group audiences", () => {
 });
 
 test("D1 store persists a context-scoped group conversation and messages", async () => {
-  const store = createMessagingStore(new FakeD1());
+  const store = createMessagingStore(new FakeD1(), { authorize: async () => true });
   const thread = await store.getOrCreateConversation({
     context: "recipe://123",
     createdBy: { type: "user", key: "alex", name: "Alex" },
@@ -126,4 +128,12 @@ test("feature middleware remains composable", async () => {
   const response = await feature.middleware(new Request("https://example.test/"), {}, {}, () => Response.json({ ok: true }), {});
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { ok: true });
+});
+
+test("feature exposes package identity and host-supplied capabilities", () => {
+  const feature = createFeature({ name: "messaging", dataResources: [{ name: "messages" }], routes: [{ path: "/messages" }] });
+  assert.equal(feature.packageName, PACKAGE_NAME);
+  assert.equal(feature.version, VERSION);
+  assert.deepEqual(feature.dataResources, [{ name: "messages" }]);
+  assert.deepEqual(feature.routes, [{ path: "/messages" }]);
 });

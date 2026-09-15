@@ -1,4 +1,6 @@
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+export const PACKAGE_NAME = "@agilesyndrome/cf-genai-messaging";
+export const VERSION = "4.1.5";
 
 export const MESSAGING_TABLES = Object.freeze({
   conversations: "messaging_conversations",
@@ -133,6 +135,11 @@ export function createMessagingStore(db, options = {}) {
   if (options.data) return createScopedMessagingStore(options.data, options);
   if (!db || typeof db.prepare !== "function") throw new TypeError("A D1 database binding is required");
   const prefix = identifier(options.prefix || "messaging", "prefix");
+  if (typeof options.authorize !== "function") throw new TypeError("A raw messaging store requires an authorize callback; use createMessagingStore(null, { data }) for scoped access.");
+  const authorize = options.authorize;
+  async function assertAuthorized(operation, details = {}) {
+    if (!await authorize({ operation, ...details })) throw new Error("messaging_forbidden");
+  }
   const tables = {
     conversations: prefix + "_conversations",
     participants: prefix + "_conversation_participants",
@@ -168,16 +175,19 @@ export function createMessagingStore(db, options = {}) {
 
   async function findConversation(context, options = {}) {
     const value = normalizeContext(context);
+    await assertAuthorized("read_conversation", { context: value });
     const row = await db.prepare("SELECT * FROM " + tables.conversations + " WHERE context=?").bind(value).first();
     return hydrate(row, options);
   }
 
   async function findConversationById(id, options = {}) {
+    await assertAuthorized("read_conversation", { conversationId: id });
     const row = await db.prepare("SELECT * FROM " + tables.conversations + " WHERE id=?").bind(id).first();
     return hydrate(row, options);
   }
 
   async function addParticipants(conversationId, values) {
+    await assertAuthorized("write_participants", { conversationId });
     for (const item of participants(values)) {
       await db.prepare("INSERT OR IGNORE INTO " + tables.participants + " (conversation_id,participant_type,participant_key,display_name,metadata_json) VALUES (?,?,?,?,?)").bind(conversationId, item.type, item.key, item.name, JSON.stringify(item.metadata)).run();
     }
@@ -185,6 +195,7 @@ export function createMessagingStore(db, options = {}) {
 
   async function createConversation(input) {
     const value = conversation(input);
+    await assertAuthorized("create_conversation", { context: value.context, conversation: value });
     const createdBy = value.createdBy;
     const row = await db.prepare("INSERT INTO " + tables.conversations + " (context,title,created_by_type,created_by_key,created_by_name) VALUES (?,?,?,?,?) RETURNING *").bind(value.context, value.title, createdBy?.type || null, createdBy?.key || null, createdBy?.name || null).first();
     await addParticipants(row.id, value.participants);
@@ -207,6 +218,7 @@ export function createMessagingStore(db, options = {}) {
   }
 
   async function appendMessage(conversationId, input) {
+    await assertAuthorized("append_message", { conversationId, message: input });
     const thread = await findConversationById(conversationId, { includeMessages: false });
     if (!thread) throw new Error("conversation_not_found");
     const value = normalizedMessage(input, thread.context);
@@ -262,6 +274,14 @@ export function createFeature(options = {}) {
   const name = options.name || "cf-genai-messaging";
   return {
     name,
+    displayName: options.displayName || "Messaging",
+    packageName: PACKAGE_NAME,
+    version: VERSION,
+    dataResources: options.dataResources || [],
+    routes: options.routes || [],
+    ...(typeof options.healthcheck === "function" ? { healthcheck: options.healthcheck } : {}),
+    healthchecks: options.healthchecks || [],
+    circuitBreakers: options.circuitBreakers || [],
     middleware: async (request, env, ctx, next, state) => {
       if (options.boot) await options.boot(env, { request, ctx, state });
       return options.handle ? options.handle(request, env, ctx, next, state) : next();
