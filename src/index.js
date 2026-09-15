@@ -130,6 +130,7 @@ function rowMessage(row) {
 }
 
 export function createMessagingStore(db, options = {}) {
+  if (options.data) return createScopedMessagingStore(options.data, options);
   if (!db || typeof db.prepare !== "function") throw new TypeError("A D1 database binding is required");
   const prefix = identifier(options.prefix || "messaging", "prefix");
   const tables = {
@@ -224,6 +225,37 @@ export function createMessagingStore(db, options = {}) {
     getMessages: messagesFor,
     appendMessage,
   });
+}
+
+function createScopedMessagingStore(reader, options = {}) {
+  if (!reader || typeof reader.list !== "function") throw new TypeError("A scoped data reader is required");
+  const names = {
+    conversations: options.conversationsResource || "messaging_conversations",
+    participants: options.participantsResource || "messaging_conversation_participants",
+    messages: options.messagesResource || "messaging_messages",
+  };
+
+  async function participantsFor(conversationId) {
+    return (await reader.list(names.participants, { where: { conversation_id: conversationId }, limit: 1000, orderBy: "id ASC" })).map(rowParticipant);
+  }
+  async function messagesFor(conversationId, options = {}) {
+    const limit = Math.max(1, Math.min(500, Number(options.limit || 100)));
+    return (await reader.list(names.messages, { where: { conversation_id: conversationId }, limit, orderBy: "id DESC" })).reverse().map(rowMessage);
+  }
+  async function hydrate(row, options = {}) {
+    if (!row) return null;
+    const value = conversation({ id: row.id, context: row.context, title: row.title, createdBy: row.created_by_key ? { type: row.created_by_type, key: row.created_by_key, name: row.created_by_name || row.created_by_key } : null, createdAt: row.created_at, updatedAt: row.updated_at, participants: [] });
+    value.participants = await participantsFor(row.id);
+    if (options.includeMessages !== false) value.messages = await messagesFor(row.id, options);
+    return value;
+  }
+  async function findConversation(context, options = {}) { return hydrate((await reader.list(names.conversations, { where: { context: normalizeContext(context) }, limit: 1 }))[0], options); }
+  async function findConversationById(id, options = {}) { return hydrate(await reader.get(names.conversations, id), options); }
+  async function addParticipants(conversationId, values) { for (const item of participants(values)) { const existing = (await reader.list(names.participants, { where: { conversation_id: conversationId, participant_type: item.type, participant_key: item.key }, limit: 1 }))[0]; if (!existing) await reader.insert(names.participants, { conversation_id: conversationId, participant_type: item.type, participant_key: item.key, display_name: item.name, metadata_json: JSON.stringify(item.metadata) }); } }
+  async function createConversation(input) { const value = conversation(input); const createdBy = value.createdBy; const row = await reader.insert(names.conversations, { context: value.context, title: value.title, created_by_type: createdBy?.type || null, created_by_key: createdBy?.key || null, created_by_name: createdBy?.name || null }); const created = row?.id ? row : (await reader.list(names.conversations, { where: { context: value.context }, limit: 1 }))[0]; await addParticipants(created.id, value.participants); return hydrate(created, { includeMessages: false }); }
+  async function getOrCreateConversation(input) { const existing = await findConversation(input.context, { includeMessages: false }); if (existing) { await addParticipants(existing.id, input.participants || []); return findConversationById(existing.id, { includeMessages: false }); } try { return await createConversation(input); } catch (error) { const raced = await findConversation(input.context, { includeMessages: false }); if (raced) return raced; throw error; } }
+  async function appendMessage(conversationId, input) { const thread = await findConversationById(conversationId, { includeMessages: false }); if (!thread) throw new Error("conversation_not_found"); const value = normalizedMessage(input, thread.context); const row = await reader.insert(names.messages, { conversation_id: conversationId, context: value.context, sender_type: value.sender.type, sender_key: value.sender.key, sender_name: value.sender.name, body: value.body, message_type: value.messageType, response_type: value.responseType, audience_json: JSON.stringify(value.audience), metadata_json: JSON.stringify(value.metadata) }); await reader.update(names.conversations, conversationId, { updated_at: new Date().toISOString() }); return rowMessage(row); }
+  return Object.freeze({ tables: names, findConversation, findConversationById, createConversation, getOrCreateConversation, addParticipants, getMessages: messagesFor, appendMessage });
 }
 
 export function createFeature(options = {}) {

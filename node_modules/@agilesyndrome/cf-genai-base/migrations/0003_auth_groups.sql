@@ -1,0 +1,3 @@
+CREATE TABLE IF NOT EXISTS auth_groups (name TEXT PRIMARY KEY, display_name TEXT NOT NULL, description TEXT NOT NULL DEFAULT "", created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS auth_user_groups (user_id TEXT NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE, group_name TEXT NOT NULL REFERENCES auth_groups(name) ON DELETE CASCADE, granted_by TEXT, granted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (user_id, group_name));
+CREATE INDEX IF NOT EXISTS auth_user_groups_group_idx ON auth_user_groups(group_name);

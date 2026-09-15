@@ -1,0 +1,9 @@
+:root {
+  --cf-ui-bg: #ffffff;
+  --cf-ui-surface: #f7f7f5;
+  --cf-ui-text: #20231f;
+  --cf-ui-muted: #687067;
+  --cf-ui-border: #d8ddd5;
+  --cf-ui-primary: #2f6f52;
+  --cf-ui-danger: #a33b32;
+}
