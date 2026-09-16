@@ -12,6 +12,7 @@
     "migrations",
     "README.md",
     "CONTRACT.md",
+    "changelog.md",
     "LICENSE"
   ],
   "scripts": {
@@ -34,6 +35,6 @@
   },
   "homepage": "https://github.com/agilesyndrome/cf-genai-messaging",
   "dependencies": {
-    "@agilesyndrome/cf-genai-base": "^4.1.1"
+    "@agilesyndrome/cf-genai-base": "^5.0.0"
   }
 }

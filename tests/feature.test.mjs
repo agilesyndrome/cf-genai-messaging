@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createJob, getJob } from "@agilesyndrome/cf-genai-base";
 import {
   conversation,
   createFeature,
   createMessagingStore,
+  executeReplyJob,
   groupMessage,
   message,
   PACKAGE_NAME,
@@ -71,6 +73,30 @@ class FakeD1 {
   }
 }
 
+class JobD1 {
+  constructor() { this.jobs = new Map(); this.events = []; }
+  prepare(sql) {
+    const db = this;
+    const statement = { args: [], bind(...args) { this.args = args; return this; } };
+    statement.run = async () => {
+      if (sql.includes("INSERT INTO core_jobs")) {
+        const [id, type, status, ownerId, tenantId, resourceType, resourceId, input, progress, createdAt, updatedAt, expiresAt] = statement.args;
+        db.jobs.set(id, { id, type, status, owner_id: ownerId, tenant_id: tenantId, resource_type: resourceType, resource_id: resourceId, input_json: input, result_json: "{}", error_json: null, progress_json: progress, created_at: createdAt, started_at: null, finished_at: null, updated_at: updatedAt, expires_at: expiresAt });
+      } else if (sql.includes("INSERT INTO core_job_events")) {
+        const [id, jobId, type, payload] = statement.args;
+        db.events.push({ id, job_id: jobId, type, payload_json: payload, created_at: new Date().toISOString() });
+      } else if (sql.startsWith("UPDATE core_jobs SET")) {
+        const row = db.jobs.get(statement.args.at(-1));
+        for (const [index, assignment] of [...sql.matchAll(/([a-z_]+) = \?/g)].entries()) row[assignment[1]] = statement.args[index];
+      }
+      return {};
+    };
+    statement.first = async () => sql.includes("SELECT * FROM core_jobs WHERE id") ? db.jobs.get(statement.args[0]) || null : null;
+    statement.all = async () => ({ results: [] });
+    return statement;
+  }
+}
+
 test("domain models support opaque contexts and group audiences", () => {
   const thread = conversation({
     context: "recipe://123",
@@ -121,6 +147,29 @@ test("D1 store persists a context-scoped group conversation and messages", async
   assert.equal(loaded.participants.length, 3);
   assert.equal(loaded.messages.length, 1);
   assert.equal(loaded.messages[0].isGroup, true);
+});
+
+test("durable reply jobs keep generation provider-neutral and persist the reply", async () => {
+  const messages = createMessagingStore(new FakeD1(), { authorize: async () => true });
+  const thread = await messages.createConversation({
+    context: "recipe://job-test",
+    createdBy: { type: "user", key: "alex", name: "Alex" },
+    participants: [{ type: "assistant", key: "chef", name: "Chef" }],
+  });
+  await messages.appendMessage(thread.id, { sender: { type: "user", key: "alex", name: "Alex" }, body: "What should I cook?" });
+  const DB = new JobD1();
+  const env = { DB, eventHandler: async () => {} };
+  const job = await createJob(env, { type: "messaging.reply", ownerId: "alex", resourceType: "conversation", resourceId: thread.id });
+  const execution = await executeReplyJob(env, job.id, {
+    store: messages,
+    conversationId: thread.id,
+    sender: { type: "assistant", key: "chef", name: "Chef" },
+    generate: ({ messages: history }) => ({ body: `I saw ${history.length} message.`, metadata: { model: "test" } }),
+  });
+  assert.equal(execution.value.body, "I saw 1 message.");
+  assert.deepEqual(execution.job.result, { conversationId: String(thread.id), messageId: String(execution.value.id) });
+  assert.equal((await getJob(env, job.id)).status, "succeeded");
+  assert.equal((await messages.findConversationById(thread.id)).messages.length, 2);
 });
 
 test("feature middleware remains composable", async () => {

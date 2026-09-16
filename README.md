@@ -55,6 +55,25 @@ The store owns no AI behavior. A host application can persist a user message,
 send the recent thread plus application context to any model, and persist the
 model or reviewer response as another message.
 
+For a long-running reply, dispatch a base job to an application-owned Workflow
+and call `executeReplyJob` inside that Workflow. Messaging loads the thread,
+invokes a provider-neutral callback, saves the reply, and completes the base
+job with only the conversation and message IDs:
+
+```js
+await executeReplyJob(this.env, event.payload.jobId, {
+  store: messaging,
+  conversationId: event.payload.conversationId,
+  sender: { type: "assistant", key: "chef", name: "Chef" },
+  generate: ({ messages, report }) => llm.generate(promptFor(messages), schema, {
+    onText: () => report({ phase: "reply_generated" }),
+  }),
+});
+```
+
+The package remains independent of `cf-genai-llm`: the application chooses the
+generator, prompt, model, and policy. Ordinary message writes do not create jobs.
+
 ## Storage
 
 The package ships migrations/0001_messaging.sql with the additive tables:

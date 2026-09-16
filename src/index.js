@@ -1,6 +1,8 @@
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+import { executeJob } from "@agilesyndrome/cf-genai-base";
+
 export const PACKAGE_NAME = "@agilesyndrome/cf-genai-messaging";
-export const VERSION = "4.1.5";
+export const VERSION = "5.0.0";
 
 export const MESSAGING_TABLES = Object.freeze({
   conversations: "messaging_conversations",
@@ -268,6 +270,36 @@ function createScopedMessagingStore(reader, options = {}) {
   async function getOrCreateConversation(input) { const existing = await findConversation(input.context, { includeMessages: false }); if (existing) { await addParticipants(existing.id, input.participants || []); return findConversationById(existing.id, { includeMessages: false }); } try { return await createConversation(input); } catch (error) { const raced = await findConversation(input.context, { includeMessages: false }); if (raced) return raced; throw error; } }
   async function appendMessage(conversationId, input) { const thread = await findConversationById(conversationId, { includeMessages: false }); if (!thread) throw new Error("conversation_not_found"); const value = normalizedMessage(input, thread.context); const row = await reader.insert(names.messages, { conversation_id: conversationId, context: value.context, sender_type: value.sender.type, sender_key: value.sender.key, sender_name: value.sender.name, body: value.body, message_type: value.messageType, response_type: value.responseType, audience_json: JSON.stringify(value.audience), metadata_json: JSON.stringify(value.metadata) }); await reader.update(names.conversations, conversationId, { updated_at: new Date().toISOString() }); return rowMessage(row); }
   return Object.freeze({ tables: names, findConversation, findConversationById, createConversation, getOrCreateConversation, addParticipants, getMessages: messagesFor, appendMessage });
+}
+
+export async function executeReplyJob(env, jobId, definition = {}, options = {}) {
+  const store = definition.store;
+  if (!store || typeof store.findConversationById !== "function" || typeof store.appendMessage !== "function") throw new TypeError("executeReplyJob requires a messaging store");
+  if (typeof definition.generate !== "function") throw new TypeError("executeReplyJob requires a generate callback");
+  const conversationId = definition.conversationId;
+  if (conversationId === undefined || conversationId === null) throw new TypeError("conversationId is required");
+  return executeJob(env, jobId, async ({ job, report }) => {
+    await report({ phase: "loading_conversation" });
+    const thread = await store.findConversationById(conversationId);
+    if (!thread) throw new Error("conversation_not_found");
+    await report({ phase: "generating_reply" });
+    const generated = await definition.generate({ conversation: thread, messages: thread.messages || [], job, report });
+    const reply = typeof generated === "string" ? { body: generated } : generated;
+    if (!reply || typeof reply !== "object" || Array.isArray(reply)) throw new TypeError("Reply generator must return a message body or message object");
+    await report({ phase: "saving_reply" });
+    return store.appendMessage(conversationId, {
+      ...reply,
+      sender: reply.sender || definition.sender,
+      messageType: reply.messageType || definition.messageType || "assistant",
+      responseType: reply.responseType || definition.responseType,
+      audience: reply.audience || definition.audience,
+      metadata: { ...(definition.metadata || {}), ...(reply.metadata || {}) },
+    });
+  }, {
+    who: options.who || "system:update",
+    ctx: options.ctx,
+    toJobResult: options.toJobResult || ((reply) => ({ conversationId: String(conversationId), messageId: String(reply.id) })),
+  });
 }
 
 export function createFeature(options = {}) {
