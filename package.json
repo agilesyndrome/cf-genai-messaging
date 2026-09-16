@@ -1,6 +1,6 @@
 {
   "name": "@agilesyndrome/cf-genai-messaging",
-  "version": "4.1.6",
+  "version": "5.0.0",
   "description": "Reusable conversations, messages, and group-message persistence for Cloudflare Workers.",
   "type": "module",
   "exports": {
@@ -34,6 +34,6 @@
   },
   "homepage": "https://github.com/agilesyndrome/cf-genai-messaging",
   "dependencies": {
-    "@agilesyndrome/cf-genai-base": "^4.1.1"
+    "@agilesyndrome/cf-genai-base": "^5.0.0"
   }
 }

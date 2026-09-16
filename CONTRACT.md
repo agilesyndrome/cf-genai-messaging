@@ -15,6 +15,9 @@
 - `getOrCreateConversation` is idempotent by context.
 - `appendMessage` updates the conversation timestamp and preserves arbitrary
   message context, response type, audience, and metadata.
+- `executeReplyJob` executes an already-dispatched base job, loads the thread,
+  invokes an application-supplied generator, persists its reply, and stores a
+  compact `{ conversationId, messageId }` job result.
 - The package does not call an AI provider, infer application context, or
   decide who should speak. Host applications own prompts, authorization, and
   response persistence.
